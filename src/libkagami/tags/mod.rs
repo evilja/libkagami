@@ -68,14 +68,14 @@ impl ASSLine {
                     mark_transform_tags(&tag, &mut transformed_since_tag);
                     if let ASSOverride::R(ref name) = tag {
                         if name.is_none() {
-                            // bare \r — reset to style baseline
+
                             current_overrides = start.clone();
                             drawing_mode = start.iter()
                                 .rev()
                                 .find_map(|ov| if let ASSOverride::P(v) = ov { Some(*v) } else { None })
                                 .unwrap_or(0);
                         } else {
-                            // named \r — can't resolve style here, just clear
+
                             current_overrides.clear();
                             drawing_mode = 0;
                         }
@@ -96,7 +96,7 @@ impl ASSLine {
                     }
                     if is_first_wins(&tag) {
                         if let Some(existing) = current_overrides.iter().find(|c| same_override_kind(c, &tag)) {
-                            // suppress only if the existing value came from an explicit tag, not the style base
+
                             if !start.iter().any(|s| s == existing) {
                                 continue;
                             }

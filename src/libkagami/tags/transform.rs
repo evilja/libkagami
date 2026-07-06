@@ -46,18 +46,18 @@ pub fn strip_conflicting_inner_tags(
     }
 }
 
-/// Invariant: if a raw override tag appears *after* a transform that animates
-/// the same variant, that inner tag is stripped from the transform.
-/// If the transform ends up with no inner tags, it is dropped entirely.
+
+
+
 pub fn apply_same_tag_after_transform(tags: Vec<ASSOverride>) -> Vec<ASSOverride> {
-    // Collect per-transform which discriminants get conflicted by later raw tags
+
     let mut transform_conflicts: Vec<HashSet<std::mem::Discriminant<ASSOverride>>> =
         tags.iter()
             .filter(|t| transform_inner_tags(t).is_some())
             .map(|_| HashSet::new())
             .collect();
 
-    // Map from tag index → transform_conflicts index
+
     let mut transform_slot: Vec<Option<usize>> = Vec::with_capacity(tags.len());
     let mut slot = 0usize;
     for tag in &tags {
@@ -69,7 +69,7 @@ pub fn apply_same_tag_after_transform(tags: Vec<ASSOverride>) -> Vec<ASSOverride
         }
     }
 
-    // Forward pass: when we see a raw tag, mark all preceding transforms that animate it
+
     let mut seen_transform_discs: Vec<(usize, Vec<std::mem::Discriminant<ASSOverride>>)> = Vec::new();
     for (i, tag) in tags.iter().enumerate() {
         if let Some(inner) = transform_inner_tags(tag) {
@@ -87,7 +87,7 @@ pub fn apply_same_tag_after_transform(tags: Vec<ASSOverride>) -> Vec<ASSOverride
         }
     }
 
-    // Apply conflicts — strip inner tags or drop transform entirely
+
     tags.into_iter()
         .enumerate()
         .filter_map(|(i, tag)| {

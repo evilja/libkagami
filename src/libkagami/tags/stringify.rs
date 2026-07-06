@@ -81,7 +81,7 @@ pub fn stringify_overrides(v: &[ASSOverride]) -> String {
         .join("")
 }
 
-/// Debug formatter for tests — human readable variant names with values
+
 pub fn fmt_override(ov: &ASSOverride) -> String {
     match ov {
         ASSOverride::BlockText(v)         => format!("BlockText({v:?})"),

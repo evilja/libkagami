@@ -5,8 +5,8 @@ use crate::libkagami::complex::helpers::{
 };
 use crate::libkagami::complex::parse::parse_clip_args;
 
-/// Parse the interior of \t(...).
-/// Format: [\tag...] | [accel,\tag...] | [t1,t2,\tag...] | [t1,t2,accel,\tag...]
+
+
 pub fn parse_transform(inner: &str) -> Option<ASSOverride> {
     let (args, _after, has_backslash_arg) = parse_parenthesized_args(inner)?;
     if !has_backslash_arg || args.is_empty() {
@@ -96,10 +96,10 @@ fn empty_transform(ov: &ASSOverride) -> bool {
     )
 }
 
-/// Parse one override tag. `s` begins immediately after the leading backslash.
-/// Returns (tag, bytes_consumed, is_malformed).
-/// is_malformed = true means an unclosed paren was found; caller should drop
-/// all subsequent tags in the block.
+
+
+
+
 pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
     let orig_len = s.len();
 
@@ -131,13 +131,13 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
         };
     }
 
-    // ── \fn — before anything else starting with 'f' ────────────────────────
+
     if let Some(rest) = s.strip_prefix("fn") {
         let (name, rest2) = parse_text_arg(rest);
         return Some((ASSOverride::Fn(name), consumed!(rest2), false));
     }
 
-    // ── float tags — longest prefix first ───────────────────────────────────
+
     try_f32!("xbord", ASSOverride::Xbord);
     try_f32!("ybord", ASSOverride::Ybord);
     try_f32!("xshad", ASSOverride::Xshad);
@@ -160,19 +160,19 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
     try_f32!("be",    ASSOverride::Be);
     try_f32!("fs",    ASSOverride::Fs);
 
-    // ── \an — before \alpha ──────────────────────────────────────────────────
+
     if let Some(rest) = s.strip_prefix("an") {
         let (val, rest2) = parse_f32_arg(rest);
         return Some((ASSOverride::An(val as u8), consumed!(rest2), false));
     }
 
-    // ── \q ───────────────────────────────────────────────────────────────────
+
     if let Some(rest) = s.strip_prefix("q") {
         let (val, rest2) = parse_f32_arg(rest);
         return Some((ASSOverride::Q(val as u8), consumed!(rest2), false));
     }
 
-    // ── \r — consumes until next \ like \fn ──────────────────────────────────
+
     if let Some(rest) = s.strip_prefix("r") {
         let end = rest.find('\\').unwrap_or(rest.len());
         let name = rest[..end].trim().to_string();
@@ -180,7 +180,7 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
         return Some((tag, consumed!(&rest[end..]), false));
     }
 
-    // ── alpha / color — longest prefix first ────────────────────────────────
+
     try_hex!("alpha", ASSOverride::Alpha);
     try_hex!("1a",    ASSOverride::AlphaI);
     try_hex!("2a",    ASSOverride::AlphaII);
@@ -196,7 +196,7 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
         return Some((ASSOverride::A(val as u8), consumed!(rest2), false));
     }
 
-    // ── karaoke — ko/kf before k, K uppercase before k ───────────────────────
+
     if let Some(rest) = s.strip_prefix("kt") {
         let (val, rest2) = parse_f32_arg(rest);
         return Some((ASSOverride::Kt(val as u32), consumed!(rest2), false));
@@ -218,14 +218,14 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
         return Some((ASSOverride::K(val as u32), consumed!(rest2), false));
     }
 
-    // ── \c — primary color alias, guard against "clip" ───────────────────────
+
     if s.starts_with('c') && !s.starts_with("clip") {
         let rest = &s[1..];
         let (val, rest2) = parse_hex_val(rest);
         return Some((ASSOverride::ColorI(val), consumed!(rest2), false));
     }
 
-    // ── paren-based tags ─────────────────────────────────────────────────────
+
 
     if let Some(rest) = s.strip_prefix("fade") {
         if rest.starts_with('(') {
@@ -327,7 +327,7 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
         }
     }
 
-    // ── single-char / short tags — LAST ──────────────────────────────────────
+
     try_flag!("b", ASSOverride::Bold);
     try_flag!("i", ASSOverride::Italic);
     try_flag!("u", ASSOverride::Underline);
@@ -341,9 +341,9 @@ pub fn parse_one_tag(s: &str) -> Option<(ASSOverride, usize, bool)> {
     None
 }
 
-/// Parse the content of a `{...}` block (without the surrounding braces).
-/// Returns (tags, malformed) where malformed = true means an unclosed paren
-/// was encountered and remaining tags were dropped.
+
+
+
 pub fn parse_override_block_content(mut s: &str) -> (Vec<ASSOverride>, bool) {
     let mut result = Vec::new();
 

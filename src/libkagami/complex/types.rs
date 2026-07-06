@@ -7,7 +7,7 @@ pub struct AssTime {
     pub hours: u8,
     pub minutes: u8,
     pub seconds: u8,
-    pub centiseconds: u8,   // ASS uses 0:00:00.00 format, not milliseconds
+    pub centiseconds: u8,
 }
 
 impl AssColour {

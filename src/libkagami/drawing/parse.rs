@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_incomplete_coords_ignored() {
-        // only 1 coord for a mode that needs 2 — should not emit a command
+
         let d = Drawing::from_str("m 100").unwrap();
         assert_eq!(d.commands.len(), 0);
     }
@@ -297,7 +297,7 @@ mod tests {
     #[test]
     fn test_invalid_token_stops_parsing() {
         let d = Drawing::from_str("m 100 200 l 300 400 INVALID 999 999").unwrap();
-        // should stop at INVALID since it's not a valid f32 or mode
+
         assert_eq!(d.commands.len(), 2);
     }
 }

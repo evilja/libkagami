@@ -50,16 +50,16 @@ pub enum ASSOverride {
     IclipII(f32, String),
     IclipRect(f32, f32, f32, f32),
     Fe(f32),
-    MoveI(f32, f32, f32, f32),           // \move(x1,y1,x2,y2)
-    MoveII(f32, f32, f32, f32, f32, f32), // \move(x1,y1,x2,y2,t1,t2)
+    MoveI(f32, f32, f32, f32),
+    MoveII(f32, f32, f32, f32, f32, f32),
     Org(f32, f32),
     Pbo(f32),
-    Fr(f32),                              // alias for frz, can normalize to Frz on parse
+    Fr(f32),
     Q(u8),
-    R(Option<String>),                    // None = reset to default, Some = named style
+    R(Option<String>),
     K(u32),
     Kt(u32),
-    KSweep(u32),                          // \K
+    KSweep(u32),
     Kf(u32),
     Ko(u32),
 }
