@@ -1,0 +1,8 @@
+[package]
+name = "libkagami"
+version = "0.1.0"
+edition = "2024"
+description = "ASS subtitle parsing and manipulation library extracted from pandora-toolchain"
+
+[dependencies]
+tokio = { version = "1", features = ["fs", "io-util"] }
