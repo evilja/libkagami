@@ -1,4 +1,5 @@
 use std::convert::Infallible;
+use std::fmt::Write;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DrawingCommand {
@@ -70,33 +71,29 @@ impl DrawingCommand {
             DrawingCommand::CloseBSpline | DrawingCommand::Invalid => {}
         }
     }
-    pub fn stringify(&self) -> String {
-        match self {
-            DrawingCommand::Move(x, y) => format!("m {} {}", format_drawing_num(*x), format_drawing_num(*y)),
-            DrawingCommand::MoveN(x, y) => format!("n {} {}", format_drawing_num(*x), format_drawing_num(*y)),
-            DrawingCommand::Line(x, y) => format!("l {} {}", format_drawing_num(*x), format_drawing_num(*y)),
-            DrawingCommand::CubicBezier(x0, y0, x1, y1, x2, y2) => format!(
-                "b {} {} {} {} {} {}",
-                format_drawing_num(*x0),
-                format_drawing_num(*y0),
-                format_drawing_num(*x1),
-                format_drawing_num(*y1),
-                format_drawing_num(*x2),
-                format_drawing_num(*y2),
-            ),
-            DrawingCommand::CubicBSpline(x0, y0, x1, y1, x2, y2) => format!(
-                "s {} {} {} {} {} {}",
-                format_drawing_num(*x0),
-                format_drawing_num(*y0),
-                format_drawing_num(*x1),
-                format_drawing_num(*y1),
-                format_drawing_num(*x2),
-                format_drawing_num(*y2),
-            ),
-            DrawingCommand::ExtendBSpline(x, y) => format!("p {} {}", format_drawing_num(*x), format_drawing_num(*y)),
-            DrawingCommand::CloseBSpline => "c".to_string(),
-            DrawingCommand::Invalid => String::new(),
-        }
+    // Appends this command, mode letter included. A traced drawing runs to
+    // thousands of commands and each coordinate used to be its own String, so
+    // the whole drawing path writes into one buffer instead.
+    pub fn write_into(&self, out: &mut String) {
+        let (mode, coords): (&str, &[f32]) = match self {
+            DrawingCommand::Move(x, y) => ("m", &[*x, *y]),
+            DrawingCommand::MoveN(x, y) => ("n", &[*x, *y]),
+            DrawingCommand::Line(x, y) => ("l", &[*x, *y]),
+            DrawingCommand::CubicBezier(x0, y0, x1, y1, x2, y2) => ("b", &[*x0, *y0, *x1, *y1, *x2, *y2]),
+            DrawingCommand::CubicBSpline(x0, y0, x1, y1, x2, y2) => ("s", &[*x0, *y0, *x1, *y1, *x2, *y2]),
+            DrawingCommand::ExtendBSpline(x, y) => ("p", &[*x, *y]),
+            DrawingCommand::CloseBSpline => ("c", &[]),
+            DrawingCommand::Invalid => return,
+        };
+        out.push_str(mode);
+        write_coords(out, coords);
+    }
+}
+
+fn write_coords(out: &mut String, coords: &[f32]) {
+    for value in coords {
+        out.push(' ');
+        write_drawing_num(out, *value);
     }
 }
 
@@ -112,11 +109,56 @@ impl Drawing {
         }
     }
     pub fn stringify(&self) -> String {
-        self.commands.iter()
-            .map(|c| c.stringify())
-            .filter(|s| !s.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ")
+        let mut out = String::new();
+        self.write_into(&mut out);
+        out
+    }
+
+    pub fn write_into(&self, out: &mut String) {
+        let mut index = 0usize;
+        let mut first = true;
+        let mut separate = |out: &mut String| {
+            if !first {
+                out.push(' ');
+            }
+            first = false;
+        };
+        while index < self.commands.len() {
+            match &self.commands[index] {
+                DrawingCommand::Line(_, _) => {
+                    separate(out);
+                    out.push('l');
+                    while let Some(DrawingCommand::Line(x, y)) = self.commands.get(index) {
+                        write_coords(out, &[*x, *y]);
+                        index += 1;
+                    }
+                }
+                DrawingCommand::CubicBezier(_, _, _, _, _, _) => {
+                    separate(out);
+                    out.push('b');
+                    while let Some(DrawingCommand::CubicBezier(x0, y0, x1, y1, x2, y2)) = self.commands.get(index) {
+                        write_coords(out, &[*x0, *y0, *x1, *y1, *x2, *y2]);
+                        index += 1;
+                    }
+                }
+                DrawingCommand::ExtendBSpline(_, _) => {
+                    separate(out);
+                    out.push('p');
+                    while let Some(DrawingCommand::ExtendBSpline(x, y)) = self.commands.get(index) {
+                        write_coords(out, &[*x, *y]);
+                        index += 1;
+                    }
+                }
+                DrawingCommand::Invalid => {
+                    index += 1;
+                }
+                command => {
+                    separate(out);
+                    command.write_into(out);
+                    index += 1;
+                }
+            }
+        }
     }
 }
 
@@ -156,19 +198,21 @@ impl std::str::FromStr for Drawing {
     }
 }
 
-fn format_drawing_num(v: f32) -> String {
+fn write_drawing_num(out: &mut String, v: f32) {
     let rounded = v.round();
     if (v - rounded).abs() < 0.0001 {
-        format!("{}", rounded as i64)
-    } else {
-        let mut s = format!("{:.4}", v);
-        while s.contains('.') && s.ends_with('0') {
-            s.pop();
-        }
-        if s.ends_with('.') {
-            s.pop();
-        }
-        s
+        let _ = write!(out, "{}", rounded as i64);
+        return;
+    }
+    let start = out.len();
+    let _ = write!(out, "{:.4}", v);
+    // The fixed-precision format pads with zeros a coordinate doesn't need;
+    // trim them back off in place rather than reformatting into a new String.
+    while out.len() > start && out.ends_with('0') {
+        out.pop();
+    }
+    if out.ends_with('.') {
+        out.pop();
     }
 }
 
@@ -205,6 +249,14 @@ mod tests {
     }
 
     #[test]
+    fn test_stringify_compacts_persistent_line_mode() {
+        let drawing = Drawing::from_str("m 0 0 l 10 10 20 20 30 30").unwrap();
+
+        assert_eq!(drawing.stringify(), "m 0 0 l 10 10 20 20 30 30");
+        assert_eq!(Drawing::from_str(&drawing.stringify()).unwrap().commands, drawing.commands);
+    }
+
+    #[test]
     fn test_cubic_bezier_single() {
         let d = Drawing::from_str("m 0 0 b 1055 694 665 431 470 300").unwrap();
         assert!(matches!(
@@ -225,6 +277,14 @@ mod tests {
             d.commands[2],
             DrawingCommand::CubicBezier(558.0, 278.0, 869.0, 564.0, 824.0, 212.0)
         ));
+    }
+
+    #[test]
+    fn test_stringify_compacts_persistent_bezier_mode() {
+        let drawing = Drawing::from_str("m 0 0 b 10 0 20 10 30 10 40 10 50 20 60 20").unwrap();
+
+        assert_eq!(drawing.stringify(), "m 0 0 b 10 0 20 10 30 10 40 10 50 20 60 20");
+        assert_eq!(Drawing::from_str(&drawing.stringify()).unwrap().commands, drawing.commands);
     }
 
     #[test]
@@ -283,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_incomplete_coords_ignored() {
-
+        // only 1 coord for a mode that needs 2 — should not emit a command
         let d = Drawing::from_str("m 100").unwrap();
         assert_eq!(d.commands.len(), 0);
     }
@@ -297,7 +357,7 @@ mod tests {
     #[test]
     fn test_invalid_token_stops_parsing() {
         let d = Drawing::from_str("m 100 200 l 300 400 INVALID 999 999").unwrap();
-
+        // should stop at INVALID since it's not a valid f32 or mode
         assert_eq!(d.commands.len(), 2);
     }
 }

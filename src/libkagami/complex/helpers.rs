@@ -1,24 +1,3 @@
-pub fn take_parens(s: &str) -> Option<(&str, &str)> {
-    debug_assert!(s.starts_with('('));
-    let inner_start = 1;
-    let mut depth = 1usize;
-    for (i, c) in s[inner_start..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    let inner = &s[inner_start..inner_start + i];
-                    let rest = &s[inner_start + i + 1..];
-                    return Some((inner, rest));
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 pub fn parse_parenthesized_args(s: &str) -> Option<(Vec<&str>, &str, bool)> {
     if !s.starts_with('(') {
         return None;
@@ -73,8 +52,8 @@ fn push_arg<'a>(args: &mut Vec<&'a str>, arg: &'a str) {
     }
 }
 
-
-
+/// Read a boolean-ish integer (0/1).
+/// Invariant: uppercase first char → false (treat as 0).
 pub fn parse_bool_val(s: &str) -> (bool, &str) {
     if s.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
         return (false, s);
@@ -87,9 +66,9 @@ pub fn parse_bool_val(s: &str) -> (bool, &str) {
     (val, &s[end..])
 }
 
-
-
-
+/// Read one f32.
+/// Invariant: uppercase first char → 0, skip to next tag.
+/// Invariant: space-separated extra values after the first are dropped.
 pub fn parse_f32_val(s: &str) -> (f32, &str) {
     let s = s.trim_start_matches(' ');
 
@@ -119,8 +98,8 @@ pub fn parse_f32_prefix(s: &str) -> Option<f32> {
     s[..end].parse::<f32>().ok()
 }
 
-
-
+/// After consuming a value, if there is non-backslash/non-brace content remaining
+/// (e.g. a second space-separated number), skip past it to the next tag boundary.
 pub fn skip_to_next_tag(s: &str) -> &str {
     let trimmed = s.trim_start_matches(' ');
     if trimmed.is_empty() || trimmed.starts_with('\\') || trimmed.starts_with('}') {
@@ -175,10 +154,4 @@ pub fn parse_hex_val(s: &str) -> (u32, &str) {
         Some((val, consumed)) => (val, &s[consumed..]),
         None => (0, s),
     }
-}
-
-pub fn parse_csv_f32s(s: &str) -> Vec<f32> {
-    s.split(',')
-        .filter_map(|p| p.trim().parse::<f32>().ok())
-        .collect()
 }

@@ -5,32 +5,37 @@ use crate::libkagami::drawing::parse::Drawing;
 use crate::libkagami::tags::parse::parse_override_block_content;
 use crate::libkagami::tags::transform::{apply_same_tag_after_transform, transform_inner_tags};
 use crate::libkagami::tags::state::{already_active, upsert_override, is_first_wins, same_override_kind, is_repeatable_effect};
-use crate::libkagami::tags::stringify::stringify_override;
+use crate::libkagami::tags::stringify::write_override;
 
 pub mod parse;
 pub mod stringify;
 pub mod state;
 pub mod transform;
 
+#[derive(Clone)]
 pub enum ASSText {
     Override(ASSOverride),
     Drawing(Drawing),
     RawText(String),
 }
 
+#[derive(Clone)]
 pub struct ASSLine {
     pub current_overrides: Vec<ASSOverride>,
     pub data: Vec<ASSText>,
 }
 
 impl ASSLine {
-    pub fn from_str_store(s: &str, start: Vec<ASSOverride>) -> Self {
+    // `start` is the style's override baseline. It is borrowed rather than
+    // owned because every event line in a script shares its style's baseline,
+    // so taking it by value made loading a file clone one per line.
+    pub fn from_str_store(s: &str, start: &[ASSOverride]) -> Self {
         if has_star_in_override_block(s) {
-            return Self { current_overrides: start, data: vec![ASSText::RawText(s.to_string())] };
+            return Self { current_overrides: start.to_vec(), data: vec![ASSText::RawText(s.to_string())] };
         }
 
         let mut data: Vec<ASSText> = Vec::new();
-        let mut current_overrides: Vec<ASSOverride> = start.clone();
+        let mut current_overrides: Vec<ASSOverride> = start.to_vec();
         let mut transformed_since_tag: HashSet<Discriminant<ASSOverride>> = HashSet::new();
         let mut raw_buf = String::new();
         let mut drawing_mode = start.iter()
@@ -68,14 +73,14 @@ impl ASSLine {
                     mark_transform_tags(&tag, &mut transformed_since_tag);
                     if let ASSOverride::R(ref name) = tag {
                         if name.is_none() {
-
-                            current_overrides = start.clone();
+                            // bare \r — reset to style baseline
+                            current_overrides = start.to_vec();
                             drawing_mode = start.iter()
                                 .rev()
                                 .find_map(|ov| if let ASSOverride::P(v) = ov { Some(*v) } else { None })
                                 .unwrap_or(0);
                         } else {
-
+                            // named \r — can't resolve style here, just clear
                             current_overrides.clear();
                             drawing_mode = 0;
                         }
@@ -96,7 +101,7 @@ impl ASSLine {
                     }
                     if is_first_wins(&tag) {
                         if let Some(existing) = current_overrides.iter().find(|c| same_override_kind(c, &tag)) {
-
+                            // suppress only if the existing value came from an explicit tag, not the style base
                             if !start.iter().any(|s| s == existing) {
                                 continue;
                             }
@@ -126,7 +131,7 @@ impl ASSLine {
         }
 
         trim_tags_without_text_after(&mut data);
-        current_overrides = final_overrides(&data, &start);
+        current_overrides = final_overrides(&data, start);
 
         Self { current_overrides, data }
     }
@@ -135,101 +140,27 @@ impl ASSLine {
 impl std::str::FromStr for ASSLine {
     type Err = std::convert::Infallible;
 
+    // Parsing without a style is parsing against an empty baseline. This used
+    // to be a second hand-written copy of from_str_store's loop, and the two
+    // had already drifted: this one cleared current_overrides for a bare \r
+    // where the other reset to the style's overrides, and it suppressed every
+    // repeat of a first-wins tag where the other let a tag override the value
+    // the style contributed. Both differences only exist when there is a
+    // baseline to reset to, so against an empty one the copies were the same
+    // parser -- and keeping them separate meant the next fix landing in one.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if has_star_in_override_block(s) {
-            return Ok(Self { current_overrides: Vec::new(), data: vec![ASSText::RawText(s.to_string())] });
-        }
-
-        let mut data: Vec<ASSText> = Vec::new();
-        let mut current_overrides: Vec<ASSOverride> = Vec::new();
-        let mut transformed_since_tag: HashSet<Discriminant<ASSOverride>> = HashSet::new();
-        let mut raw_buf = String::new();
-        let mut drawing_mode = 0;
-
-        let bytes = s.as_bytes();
-        let mut i = 0;
-
-        while i < bytes.len() {
-            if bytes[i] == b'{' {
-                if !raw_buf.is_empty() {
-                    push_text(&mut data, std::mem::take(&mut raw_buf), drawing_mode);
-                }
-
-                if find_block_end(bytes, i + 1).is_none() {
-                    raw_buf.push('{');
-                    i += 1;
-                    continue;
-                }
-
-                let block_start = i + 1;
-                let block_end = find_block_end(bytes, block_start).unwrap();
-
-                let block_content = &s[block_start..block_end];
-                let (tags, _) = parse_override_block_content(block_content);
-                let tags = apply_same_tag_after_transform(tags);
-
-                for tag in tags {
-                    if matches!(&tag, ASSOverride::BlockText(_)) {
-                        data.push(ASSText::Override(tag));
-                        continue;
-                    }
-                    mark_transform_tags(&tag, &mut transformed_since_tag);
-                    if matches!(&tag, ASSOverride::R(_)) {
-                        current_overrides.clear();
-                        drawing_mode = 0;
-                        transformed_since_tag.clear();
-                        data.push(ASSText::Override(tag));
-                        continue;
-                    }
-                    if let ASSOverride::P(v) = &tag {
-                        drawing_mode = *v;
-                    }
-                    let tag_disc = discriminant(&tag);
-                    if is_repeatable_effect(&tag) {
-                        data.push(ASSText::Override(tag));
-                        continue;
-                    }
-                    if already_active(&current_overrides, &tag) && !transformed_since_tag.contains(&tag_disc) {
-                        continue;
-                    }
-                    if is_first_wins(&tag) {
-                        if current_overrides.iter().any(|c| same_override_kind(c, &tag)) {
-                            continue;
-                        }
-                    }
-                    upsert_override(&mut current_overrides, tag.clone());
-                    transformed_since_tag.remove(&tag_disc);
-                    data.push(ASSText::Override(tag));
-                }
-
-                i = block_end + 1;
-            } else {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() && (bytes[i + 1] == b'{' || bytes[i + 1] == b'}') {
-                    raw_buf.push('\\');
-                    raw_buf.push(bytes[i + 1] as char);
-                    i += 2;
-                    continue;
-                }
-                let ch_len = s[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
-                raw_buf.push_str(&s[i..i + ch_len]);
-                i += ch_len;
-            }
-        }
-
-        if !raw_buf.is_empty() {
-            push_text(&mut data, raw_buf, drawing_mode);
-        }
-
-        trim_tags_without_text_after(&mut data);
-        current_overrides = final_overrides(&data, &[]);
-
-        Ok(Self { current_overrides, data })
+        Ok(Self::from_str_store(s, &[]))
     }
 }
 
 impl ASSLine {
     pub fn stringify(&self) -> String {
         let mut out = String::new();
+        self.write_into(&mut out);
+        out
+    }
+
+    pub fn write_into(&self, out: &mut String) {
         let mut i = 0;
         while i < self.data.len() {
             if matches!(self.data[i], ASSText::Override(_)) {
@@ -239,7 +170,7 @@ impl ASSLine {
                         if !matches!(ov, ASSOverride::BlockText(_)) {
                             out.push('\\');
                         }
-                        out.push_str(&stringify_override(ov));
+                        write_override(out, ov);
                         i += 1;
                     } else {
                         break;
@@ -250,12 +181,66 @@ impl ASSLine {
                 out.push_str(t);
                 i += 1;
             } else if let ASSText::Drawing(d) = &self.data[i] {
-                out.push_str(&d.stringify());
+                d.write_into(out);
                 i += 1;
             }
         }
-        out
     }
+
+    // Explicit tags inside raw fallback blocks intentionally report no signals.
+    pub fn has_fn(&self) -> bool {
+        self.data.iter().any(|item| match item {
+            ASSText::Override(ov) => override_has_fn(ov),
+            _ => false,
+        })
+    }
+
+    // Parsed drawings and positive drawing modes both count as vector work.
+    pub fn has_drawing(&self) -> bool {
+        self.data.iter().any(|item| match item {
+            ASSText::Drawing(_) => true,
+            ASSText::Override(ov) => override_has_drawing(ov),
+            ASSText::RawText(_) => false,
+        })
+    }
+
+    // A transform counts once itself and once for each recursively nested tag.
+    pub fn tag_count(&self) -> usize {
+        self.data.iter().map(|item| match item {
+            ASSText::Override(ov) => override_tag_count(ov),
+            _ => 0,
+        }).sum()
+    }
+}
+
+fn transform_tags(ov: &ASSOverride) -> Option<&[ASSOverride]> {
+    match ov {
+        ASSOverride::TransformI(tags) => Some(tags),
+        ASSOverride::TransformII(_, tags) => Some(tags),
+        ASSOverride::TransformIII(_, _, tags) => Some(tags),
+        ASSOverride::TransformIV(_, _, _, tags) => Some(tags),
+        _ => None,
+    }
+}
+
+fn override_has_fn(ov: &ASSOverride) -> bool {
+    matches!(ov, ASSOverride::Fn(_))
+        || transform_tags(ov)
+            .map(|tags| tags.iter().any(override_has_fn))
+            .unwrap_or(false)
+}
+
+fn override_has_drawing(ov: &ASSOverride) -> bool {
+    matches!(ov, ASSOverride::P(value) if *value > 0)
+        || transform_tags(ov)
+            .map(|tags| tags.iter().any(override_has_drawing))
+            .unwrap_or(false)
+}
+
+fn override_tag_count(ov: &ASSOverride) -> usize {
+    1 + transform_tags(ov)
+        .map(|tags| tags.iter().map(override_tag_count).sum::<usize>())
+        .unwrap_or(0)
 }
 
 fn push_text(data: &mut Vec<ASSText>, text: String, drawing_mode: u8) {
@@ -619,11 +604,45 @@ mod tests {
     fn test_trailing_tags_reset_to_style_baseline_after_store() {
         let line = ASSLine::from_str_store(
             r"{\fs80}Hello{\fnTrailing}",
-            vec![ASSOverride::Fn("DefaultFont".to_string()), ASSOverride::Fs(20.0)],
+            &[ASSOverride::Fn("DefaultFont".to_string()), ASSOverride::Fs(20.0)],
         );
         assert_eq!(line.stringify(), r"{\fs80}Hello");
         assert!(line.current_overrides.iter().any(|t| matches!(t, ASSOverride::Fn(name) if name == "DefaultFont")));
         assert!(line.current_overrides.iter().any(|t| matches!(t, ASSOverride::Fs(80.0))));
         assert!(!line.current_overrides.iter().any(|t| matches!(t, ASSOverride::Fn(name) if name == "Trailing")));
+    }
+
+    #[test]
+    fn structured_weight_counts_explicit_tags_only() {
+        let line: ASSLine = r"{\pos(10,20)\fs40}text".parse().unwrap();
+        assert_eq!(line.tag_count(), 2);
+        assert!(!line.has_fn());
+
+        let transformed: ASSLine = r"{\t(\fs40\1c&HFFFFFF&)}text".parse().unwrap();
+        assert_eq!(transformed.tag_count(), 3);
+
+        let plain: ASSLine = r"foo\Nbar\hbaz".parse().unwrap();
+        assert_eq!(plain.tag_count(), 0);
+        assert!(!plain.has_fn());
+        assert!(!plain.has_drawing());
+    }
+
+    #[test]
+    fn structured_weight_detects_drawings_and_transformed_fonts() {
+        let drawing: ASSLine = r"{\p1}m 0 0 l 10 0 10 10{\p0}".parse().unwrap();
+        assert!(drawing.has_drawing());
+
+        let transformed_fn: ASSLine = r"{\t(\fnTypeset Font)}text".parse().unwrap();
+        assert!(transformed_fn.has_fn());
+        assert_eq!(transformed_fn.tag_count(), 2);
+    }
+
+    #[test]
+    fn structured_weight_raw_fallback_has_no_signals() {
+        let line: ASSLine = r"I {*\fnIgnored\p1\fs40}m 0 0 l 10 10".parse().unwrap();
+
+        assert!(!line.has_fn());
+        assert!(!line.has_drawing());
+        assert_eq!(line.tag_count(), 0);
     }
 }
